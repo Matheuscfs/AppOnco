@@ -17,6 +17,7 @@ import {
   AlertCircle,
   X,
   Save,
+  Settings,
   Loader2,
   Thermometer,
   Download,
@@ -72,7 +73,7 @@ export default function App() {
   const [galleryImages, setGalleryImages] = useState<GalleryImage[]>([]);
 
   // Form States
-  const [showForm, setShowForm] = useState<'none' | 'chemo' | 'exam' | 'blood' | 'pill' | 'symptom' | 'scanner' | 'question' | 'leave' | 'gallery'>('none');
+  const [showForm, setShowForm] = useState<'none' | 'chemo' | 'exam' | 'blood' | 'pill' | 'symptom' | 'scanner' | 'question' | 'leave' | 'gallery' | 'profile_edit'>('none');
   const [newChemo, setNewChemo] = useState({ tipo: 'Vermelha', ciclo: 1, total: 4, data: format(new Date(), 'yyyy-MM-dd') });
   const [newExam, setNewExam] = useState({ tipo: '', data: format(new Date(), 'yyyy-MM-dd'), medico: '', birads: '' });
   const [newBlood, setNewBlood] = useState({ data: format(new Date(), 'yyyy-MM-dd'), leucocitos: 4500, hemoglobina: 12, plaquetas: 250000 });
@@ -82,6 +83,7 @@ export default function App() {
   const [newQuestion, setNewQuestion] = useState({ pergunta: '' });
   const [newLeave, setNewLeave] = useState({ data_inicio: format(new Date(), 'yyyy-MM-dd'), dias: 15, medico: '' });
   const [newGallery, setNewGallery] = useState<{ categoria: string; tags: string; file: File | null }>({ categoria: 'Evolução', tags: '', file: null });
+  const [newPatient, setNewPatient] = useState<Partial<Patient>>({});
   const [uploading, setUploading] = useState(false);
   const [selectedExamType, setSelectedExamType] = useState('Todos');
   const [aiClassifying, setAiClassifying] = useState(false);
@@ -313,6 +315,36 @@ export default function App() {
     }
   }
 
+  async function handleUpdatePatient() {
+    if (!isSupabaseConfigured || !patient) return;
+    setUploading(true);
+    try {
+      const { error } = await supabase
+        .from('patients')
+        .update({
+          nome: newPatient.nome,
+          cid_principal: newPatient.cid_principal,
+          diagnostico_patologico: newPatient.diagnostico_patologico,
+          peso: newPatient.peso,
+          data_internacao: newPatient.data_internacao,
+          equipe_medica: newPatient.equipe_medica,
+          foto_url: newPatient.foto_url
+        })
+        .eq('id', patient.id);
+
+      if (error) throw error;
+      
+      setPatient(prev => prev ? { ...prev, ...newPatient } : null);
+      setIsAddModalOpen(false);
+      setShowForm('none');
+    } catch (error) {
+      console.error('Error updating patient:', error);
+      alert('Erro ao atualizar perfil.');
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function handleUploadDoc() {
     if (!isSupabaseConfigured || !newDoc.file) return;
     setUploading(true);
@@ -328,7 +360,12 @@ export default function App() {
         .from('files')
         .upload(filePath, newDoc.file);
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        if (uploadError.message === 'Bucket not found') {
+          throw new Error('O bucket "files" não foi encontrado no Supabase Storage. Por favor, crie o bucket com acesso público.');
+        }
+        throw uploadError;
+      }
 
       const { data: { publicUrl } } = supabase.storage
         .from('files')
@@ -467,6 +504,29 @@ export default function App() {
     }
   }
 
+  async function handleToggleChemo(id: string, realizada: boolean) {
+    if (!isSupabaseConfigured) return;
+    try {
+      const { error } = await supabase.from('chemo_sessions').update({ realizada: !realizada }).eq('id', id);
+      if (error) throw error;
+      fetchData();
+    } catch (error) {
+      console.error('Error toggling chemo:', error);
+    }
+  }
+
+  async function handleToggleChemoType(id: string, currentType: 'Vermelha' | 'Branca') {
+    if (!isSupabaseConfigured) return;
+    try {
+      const newType = currentType === 'Vermelha' ? 'Branca' : 'Vermelha';
+      const { error } = await supabase.from('chemo_sessions').update({ tipo: newType }).eq('id', id);
+      if (error) throw error;
+      fetchData();
+    } catch (error) {
+      console.error('Error toggling chemo type:', error);
+    }
+  }
+
   async function handleAddLeave() {
     if (!isSupabaseConfigured) return;
     try {
@@ -555,6 +615,8 @@ export default function App() {
     { data_medicao: '2026-03-26', maior_eixo_mm: 26.1, label: '26/03' },
   ];
 
+  const nextSession = chemoSessions.find(s => !s.realizada) || chemoSessions[chemoSessions.length - 1];
+
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-24">
       {/* Header */}
@@ -605,27 +667,30 @@ export default function App() {
       {activeTab === 'dashboard' && (
         <main className="max-w-md mx-auto px-4 pt-6 space-y-6 pb-24">
           {/* Current Cycle Card [NEW] */}
-          {chemoSessions.length > 0 && (
+          {nextSession && (
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-gradient-to-br from-rose-500 to-rose-600 p-5 rounded-3xl text-white shadow-lg shadow-rose-200"
+              className={cn(
+                "p-5 rounded-3xl text-white shadow-lg",
+                nextSession.tipo === 'Vermelha' ? "bg-gradient-to-br from-rose-500 to-rose-600 shadow-rose-200" : "bg-gradient-to-br from-blue-500 to-blue-600 shadow-blue-200"
+              )}
             >
               <div className="flex justify-between items-start mb-4">
                 <div>
-                  <p className="text-rose-100 text-xs font-medium mb-1">Ciclo de Quimioterapia</p>
-                  <h3 className="text-2xl font-bold">Dia 5 de 21</h3>
+                  <p className="text-white/80 text-xs font-medium mb-1">Próximo Ciclo: {nextSession.tipo}</p>
+                  <h3 className="text-2xl font-bold">Ciclo {nextSession.ciclo_atual} de {nextSession.total_ciclos}</h3>
                 </div>
                 <div className="bg-white/20 p-2 rounded-xl">
-                  <Activity size={24} />
+                  <Droplets size={24} />
                 </div>
               </div>
               <div className="w-full bg-white/20 h-2 rounded-full overflow-hidden">
-                <div className="bg-white h-full rounded-full" style={{ width: '23.8%' }} />
+                <div className="bg-white h-full rounded-full" style={{ width: `${(nextSession.ciclo_atual / nextSession.total_ciclos) * 100}%` }} />
               </div>
-              <div className="flex justify-between mt-2 text-[10px] font-medium text-rose-100">
-                <span>Início: 28/03</span>
-                <span>Próxima: 18/04</span>
+              <div className="flex justify-between mt-2 text-[10px] font-medium text-white/80">
+                <span>Previsto: {format(parseISO(nextSession.data_prevista), "dd/MM/yy")}</span>
+                <span>{nextSession.realizada ? 'Realizado' : 'Pendente'}</span>
               </div>
             </motion.div>
           )}
@@ -727,11 +792,11 @@ export default function App() {
             <div className="flex items-center justify-between px-1">
               <h2 className="text-sm font-bold text-slate-800">Checklist de Quimioterapia</h2>
               <div className="flex gap-2">
-                <span className="flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded">
+                <span className="flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-100">
                   <div className="w-1.5 h-1.5 rounded-full bg-rose-600" /> Vermelha
                 </span>
-                <span className="flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
-                  <div className="w-1.5 h-1.5 rounded-full bg-slate-400" /> Branca
+                <span className="flex items-center gap-1 text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                  <div className="w-1.5 h-1.5 rounded-full bg-blue-400" /> Branca
                 </span>
               </div>
             </div>
@@ -749,25 +814,32 @@ export default function App() {
                   )}
                 >
                   <div className="flex items-center gap-4">
-                    <div className={cn(
-                      "w-10 h-10 rounded-xl flex items-center justify-center",
-                      session.tipo === 'Vermelha' ? "bg-rose-100 text-rose-600" : "bg-slate-100 text-slate-600"
-                    )}>
+                    <button 
+                      onClick={() => handleToggleChemoType(session.id, session.tipo)}
+                      className={cn(
+                        "w-10 h-10 rounded-xl flex items-center justify-center transition-colors active:scale-90",
+                        session.tipo === 'Vermelha' ? "bg-rose-100 text-rose-600 hover:bg-rose-200" : "bg-blue-100 text-blue-600 hover:bg-blue-200"
+                      )}
+                      title="Clique para alterar o tipo"
+                    >
                       <Droplets size={20} />
-                    </div>
+                    </button>
                     <div>
                       <h3 className="text-sm font-bold text-slate-800">
-                        Ciclo {session.ciclo_atual}/{session.total_ciclos} • {session.tipo}
+                        Ciclo {session.ciclo_atual}/{session.total_ciclos} • <span className={session.tipo === 'Vermelha' ? "text-rose-600" : "text-blue-600"}>{session.tipo}</span>
                       </h3>
                       <p className="text-[10px] text-slate-400 font-medium">
                         {format(parseISO(session.data_prevista), "dd 'de' MMMM", { locale: ptBR })}
                       </p>
                     </div>
                   </div>
-                  <button className={cn(
-                    "p-2 rounded-full transition-colors",
-                    session.realizada ? "text-emerald-600" : "text-slate-300 hover:text-rose-400"
-                  )}>
+                  <button 
+                    onClick={() => handleToggleChemo(session.id, session.realizada)}
+                    className={cn(
+                      "p-2 rounded-full transition-colors",
+                      session.realizada ? "text-emerald-600" : "text-slate-300 hover:text-rose-400"
+                    )}
+                  >
                     {session.realizada ? <CheckCircle2 size={24} /> : <Circle size={24} />}
                   </button>
                 </motion.div>
@@ -1014,165 +1086,234 @@ export default function App() {
         </main>
       )}
 
-      {activeTab === 'gallery' && (
-        <main className="max-w-md mx-auto px-4 pt-6 space-y-6 pb-24 text-center">
-          <div className="flex items-center justify-between px-1 text-left">
-            <h2 className="text-xl font-bold text-slate-800">Diário Visual</h2>
-            <button onClick={() => setShowForm('gallery')} className="p-2 bg-rose-500 text-white rounded-full shadow-lg">
-              <Camera size={20} />
-            </button>
-          </div>
-
-          {/* Filter Tags */}
-          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-            {['Todos', 'Evolução', 'Pele', 'Cabelo', 'Cateter'].map(tag => (
-              <button 
-                key={tag}
-                className="px-4 py-1.5 rounded-full bg-white border border-slate-200 text-[10px] font-bold text-slate-500 whitespace-nowrap active:bg-rose-500 active:text-white"
-              >
-                {tag}
-              </button>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            {galleryImages.length > 0 ? galleryImages.map((img) => (
-              <motion.div 
-                key={img.id}
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="group relative aspect-square bg-slate-100 rounded-2xl overflow-hidden border border-slate-200 shadow-sm"
-              >
-                <img 
-                  src={img.arquivo_url} 
-                  alt={img.categoria} 
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover transition-transform group-hover:scale-110" 
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 to-transparent flex flex-col justify-end p-3 text-left">
-                  <div className="flex gap-1 mb-1">
-                    {img.tags?.map(t => (
-                      <span key={t} className="text-[6px] bg-white/20 px-1 rounded text-white uppercase font-bold">{t}</span>
-                    ))}
-                  </div>
-                  <p className="text-[10px] font-bold text-white truncate">{img.categoria}</p>
-                  <p className="text-[8px] text-white/70 font-medium">{format(parseISO(img.data_captura || new Date().toISOString()), 'dd/MM/yyyy')}</p>
-                </div>
-              </motion.div>
-            )) : (
-              <div className="col-span-2 py-20 flex flex-col items-center gap-4 text-slate-400">
-                <ImageIcon size={48} className="opacity-20" />
-                <p className="text-sm font-medium">Nenhuma foto registrada</p>
-              </div>
-            )}
-          </div>
-        </main>
-      )}
-
-      {activeTab === 'questions' && (
+      {activeTab === 'medications' && (
         <main className="max-w-md mx-auto px-4 pt-6 space-y-6 pb-24">
           <div className="flex items-center justify-between px-1">
-            <h2 className="text-xl font-bold text-slate-800">Dúvidas para Consulta</h2>
-            <button onClick={() => setShowForm('question')} className="p-2 bg-rose-500 text-white rounded-full shadow-lg">
-              <Plus size={20} />
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            {questions.length > 0 ? questions.map((q) => (
-              <motion.div 
-                key={q.id}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                className={cn(
-                  "p-4 rounded-2xl border transition-all",
-                  q.respondida ? "bg-slate-50 border-slate-100 opacity-60" : "bg-white border-rose-100 shadow-sm"
-                )}
-              >
-                <div className="flex items-start gap-3">
-                  <button 
-                    onClick={() => handleToggleQuestion(q.id, q.respondida)}
-                    className={cn(
-                      "mt-1 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors",
-                      q.respondida ? "bg-rose-500 border-rose-500 text-white" : "border-slate-200"
-                    )}
-                  >
-                    {q.respondida && <Check size={12} />}
-                  </button>
-                  <div className="flex-1">
-                    <p className={cn("text-sm font-bold", q.respondida ? "text-slate-400 line-through" : "text-slate-800")}>
-                      {q.pergunta}
-                    </p>
-                    {q.resposta && (
-                      <p className="mt-2 text-xs text-slate-500 bg-slate-100 p-2 rounded-lg italic">
-                        R: {q.resposta}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </motion.div>
-            )) : (
-              <div className="py-20 flex flex-col items-center gap-4 text-slate-400">
-                <MessageSquare size={48} className="opacity-20" />
-                <p className="text-sm font-medium text-center">Anote aqui suas dúvidas para não esquecer na próxima consulta.</p>
-              </div>
-            )}
-          </div>
-        </main>
-      )}
-
-      {activeTab === 'leaves' && (
-        <main className="max-w-md mx-auto px-4 pt-6 space-y-6 pb-24">
-          <div className="flex items-center justify-between px-1">
-            <h2 className="text-xl font-bold text-slate-800">Afastamentos e Licenças</h2>
-            <button onClick={() => setShowForm('leave')} className="p-2 bg-rose-500 text-white rounded-full shadow-lg">
+            <h2 className="text-xl font-bold text-slate-800">Medicamentos</h2>
+            <button onClick={() => setShowForm('pill')} className="p-2 bg-rose-500 text-white rounded-full shadow-lg">
               <Plus size={20} />
             </button>
           </div>
 
           <div className="space-y-4">
-            {medicalLeaves.length > 0 ? medicalLeaves.map((leave) => (
-              <motion.div 
-                key={leave.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm"
-              >
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-500 flex items-center justify-center">
-                    <Briefcase size={20} />
+            {prescriptions.length > 0 ? prescriptions.map((presc) => {
+              const isTaken = medicationLogs.some(log => 
+                log.prescription_id === presc.id && 
+                format(parseISO(log.data_tomada), 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')
+              );
+              
+              return (
+                <motion.div 
+                  key={presc.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={cn(
+                      "w-10 h-10 rounded-xl flex items-center justify-center",
+                      isTaken ? "bg-emerald-100 text-emerald-600" : "bg-indigo-50 text-indigo-600"
+                    )}>
+                      <Pill size={20} />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-800">{presc.medicamento}</h3>
+                      <p className="text-[10px] text-slate-500 font-medium">{presc.dosagem} • {presc.frequencia}</p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-800">Atestado Médico</h3>
-                    <p className="text-[10px] text-slate-400 font-medium">Dr(a). {leave.medico_atestado}</p>
+                  <div className="flex items-center gap-2">
+                    {presc.arquivo_url && (
+                      <a 
+                        href={presc.arquivo_url} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="p-2 text-slate-400 hover:text-rose-500 transition-colors"
+                      >
+                        <FileText size={18} />
+                      </a>
+                    )}
+                    <button 
+                      onClick={() => !isTaken && logMedication(presc.id)}
+                      className={cn(
+                        "p-2 rounded-full transition-all",
+                        isTaken ? "text-emerald-600" : "text-slate-200 hover:text-indigo-400"
+                      )}
+                    >
+                      <CheckCircle2 size={24} />
+                    </button>
                   </div>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-slate-50 p-3 rounded-xl">
-                    <p className="text-[8px] font-bold text-slate-400 uppercase mb-1">Início</p>
-                    <p className="text-xs font-bold text-slate-700">{format(parseISO(leave.data_inicio), 'dd/MM/yyyy')}</p>
-                  </div>
-                  <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-100">
-                    <p className="text-[8px] font-bold text-emerald-400 uppercase mb-1">Retorno Previsto</p>
-                    <p className="text-xs font-bold text-emerald-700">{format(parseISO(leave.data_retorno_prevista), 'dd/MM/yyyy')}</p>
-                  </div>
-                </div>
-                <div className="mt-3 text-center">
-                  <span className="text-[10px] font-bold text-slate-400">{leave.dias_concedidos} dias de afastamento</span>
-                </div>
-              </motion.div>
-            )) : (
+                </motion.div>
+              );
+            }) : (
               <div className="py-20 flex flex-col items-center gap-4 text-slate-400">
-                <Briefcase size={48} className="opacity-20" />
-                <p className="text-sm font-medium">Nenhuma licença registrada</p>
+                <Pill size={48} className="opacity-20" />
+                <p className="text-sm font-medium">Nenhum medicamento registrado</p>
               </div>
             )}
           </div>
+          
+          {/* History Section */}
+          {medicationLogs.length > 0 && (
+            <section className="mt-8">
+              <h3 className="text-sm font-bold text-slate-800 mb-4 px-1 flex items-center gap-2">
+                <History size={16} className="text-slate-400" />
+                Histórico Recente
+              </h3>
+              <div className="space-y-2">
+                {medicationLogs.slice(0, 10).map((log) => {
+                  const presc = prescriptions.find(p => p.id === log.prescription_id);
+                  return (
+                    <div key={log.id} className="flex items-center justify-between p-3 bg-white rounded-xl border border-slate-100 text-xs">
+                      <div className="flex items-center gap-3">
+                        <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                        <span className="font-bold text-slate-700">{presc?.medicamento || 'Medicamento'}</span>
+                      </div>
+                      <span className="text-slate-400">{format(parseISO(log.data_tomada), "dd/MM HH:mm")}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
         </main>
       )}
 
-      {/* Add Modal Overlay */}
+      {activeTab === 'profile' && (
+        <main className="max-w-md mx-auto px-4 pt-6 space-y-6 pb-24">
+          <div className="flex items-center justify-between px-1">
+            <h2 className="text-xl font-bold text-slate-800">Perfil do Paciente</h2>
+            <button 
+              onClick={() => {
+                setNewPatient(patient || {});
+                setShowForm('profile_edit');
+                setIsAddModalOpen(true);
+              }}
+              className="text-xs font-bold text-rose-500 uppercase tracking-widest flex items-center gap-1"
+            >
+              <Settings size={14} />
+              Editar
+            </button>
+          </div>
+
+          <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+            <div className="flex flex-col items-center text-center mb-6">
+              <div className="w-24 h-24 rounded-full bg-rose-100 flex items-center justify-center text-rose-600 mb-4 border-4 border-white shadow-md overflow-hidden">
+                {patient?.foto_url ? (
+                  <img src={patient.foto_url} alt="Foto" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                ) : (
+                  <User size={48} />
+                )}
+              </div>
+              <h3 className="text-lg font-bold text-slate-800">{patient?.nome || 'Paciente'}</h3>
+              <p className="text-xs font-medium text-slate-400 uppercase tracking-widest mt-1">Jornada de Tratamento</p>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Diagnóstico</p>
+                <p className="text-sm font-bold text-slate-700 leading-relaxed">
+                  {patient?.diagnostico_patologico || 'Carcinoma Mamário Invasivo'}
+                </p>
+                <div className="mt-3 flex items-center gap-2">
+                  <span className="bg-rose-100 text-rose-600 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    CID: {patient?.cid_principal || 'C50'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Peso</p>
+                  <p className="text-xs font-bold text-slate-700">{patient?.peso ? `${patient.peso} kg` : '--'}</p>
+                </div>
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Internação</p>
+                  <p className="text-xs font-bold text-slate-700">{patient?.data_internacao ? format(parseISO(patient.data_internacao), 'dd/MM/yy') : '--'}</p>
+                </div>
+              </div>
+
+              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Equipe Médica</p>
+                <p className="text-xs text-slate-600 whitespace-pre-line">
+                  {patient?.equipe_medica || 'Não informada'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Medical Leaves Summary in Profile */}
+          {medicalLeaves.length > 0 && (
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold text-slate-800 px-1">Licenças e Afastamentos</h3>
+              <div className="space-y-3">
+                {medicalLeaves.map((leave) => (
+                  <div key={leave.id} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-cyan-50 text-cyan-600 flex items-center justify-center">
+                        <Briefcase size={16} />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-slate-700">{leave.dias_concedidos} dias</p>
+                        <p className="text-[10px] text-slate-400">Início: {format(parseISO(leave.data_inicio), 'dd/MM/yy')}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] font-bold text-emerald-600">Retorno</p>
+                      <p className="text-[10px] font-bold text-slate-700">{format(parseISO(leave.data_retorno_prevista), 'dd/MM/yy')}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Questions Section in Profile */}
+          <section className="space-y-3">
+            <div className="flex items-center justify-between px-1">
+              <h3 className="text-sm font-bold text-slate-800">Dúvidas para Consulta</h3>
+              <button onClick={() => setShowForm('question')} className="text-[10px] font-bold text-rose-500 uppercase tracking-widest">Adicionar</button>
+            </div>
+            <div className="space-y-3">
+              {questions.length > 0 ? questions.map((q) => (
+                <div 
+                  key={q.id}
+                  className={cn(
+                    "p-4 rounded-2xl border transition-all",
+                    q.respondida ? "bg-slate-50 border-slate-100 opacity-60" : "bg-white border-rose-100 shadow-sm"
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <button 
+                      onClick={() => handleToggleQuestion(q.id, q.respondida)}
+                      className={cn(
+                        "mt-1 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors",
+                        q.respondida ? "bg-rose-500 border-rose-500 text-white" : "border-slate-200"
+                      )}
+                    >
+                      {q.respondida && <Check size={12} />}
+                    </button>
+                    <div className="flex-1">
+                      <p className={cn("text-sm font-bold", q.respondida ? "text-slate-400 line-through" : "text-slate-800")}>
+                        {q.pergunta}
+                      </p>
+                      {q.resposta && (
+                        <p className="mt-2 text-xs text-slate-500 bg-slate-100 p-2 rounded-lg italic">
+                          R: {q.resposta}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )) : (
+                <div className="py-8 flex flex-col items-center gap-2 text-slate-400 bg-white rounded-2xl border border-dashed border-slate-200">
+                  <MessageSquare size={24} className="opacity-20" />
+                  <p className="text-[10px] font-medium">Nenhuma dúvida registrada</p>
+                </div>
+              )}
+            </div>
+          </section>
+        </main>
+      )}
       <AnimatePresence>
         {isAddModalOpen && (
           <>
@@ -1253,13 +1394,6 @@ export default function App() {
                   >
                     <Briefcase size={32} />
                     <span className="text-xs font-bold uppercase">Licença</span>
-                  </button>
-                  <button 
-                    onClick={() => setShowForm('gallery')}
-                    className="flex flex-col items-center gap-3 p-6 rounded-2xl bg-pink-50 border border-pink-100 text-pink-600 hover:bg-pink-100 transition-colors"
-                  >
-                    <ImageIcon size={32} />
-                    <span className="text-xs font-bold uppercase">Foto</span>
                   </button>
                 </div>
               ) : (
@@ -1557,56 +1691,47 @@ export default function App() {
                       </button>
                     </>
                   )}
-
-                  {showForm === 'gallery' && (
-                    <>
+                  {showForm === 'profile_edit' && (
+                    <div className="space-y-4">
                       <div>
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Categoria</label>
-                        <select 
-                          value={newGallery.categoria} 
-                          onChange={(e) => setNewGallery({...newGallery, categoria: e.target.value})}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-rose-500"
-                        >
-                          {['Evolução', 'Pele', 'Cabelo', 'Cateter', 'Outro'].map(c => (
-                            <option key={c} value={c}>{c}</option>
-                          ))}
-                        </select>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Nome Completo</label>
+                        <input type="text" value={newPatient.nome || ''} onChange={(e) => setNewPatient({...newPatient, nome: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-rose-500" />
                       </div>
                       <div>
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Tags (separadas por vírgula)</label>
-                        <input type="text" placeholder="Ex: Vermelhidão, Cicatrização" value={newGallery.tags} onChange={(e) => setNewGallery({...newGallery, tags: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-rose-500" />
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">URL da Foto</label>
+                        <input type="text" value={newPatient.foto_url || ''} onChange={(e) => setNewPatient({...newPatient, foto_url: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-rose-500" />
                       </div>
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Foto</label>
-                        <div className="relative">
-                          <input 
-                            type="file" 
-                            accept="image/*" 
-                            capture="environment"
-                            onChange={(e) => setNewGallery({...newGallery, file: e.target.files?.[0] || null})}
-                            className="hidden" 
-                            id="gallery-upload"
-                          />
-                          <label 
-                            htmlFor="gallery-upload"
-                            className="w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl px-4 py-8 flex flex-col items-center gap-2 cursor-pointer hover:bg-slate-100 transition-colors"
-                          >
-                            <Camera className="text-slate-400" size={32} />
-                            <span className="text-xs font-bold text-slate-500">
-                              {newGallery.file ? newGallery.file.name : 'Toque para tirar foto ou selecionar'}
-                            </span>
-                          </label>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">CID Principal</label>
+                          <input type="text" value={newPatient.cid_principal || ''} onChange={(e) => setNewPatient({...newPatient, cid_principal: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-rose-500" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Peso (kg)</label>
+                          <input type="number" value={newPatient.peso || ''} onChange={(e) => setNewPatient({...newPatient, peso: parseFloat(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-rose-500" />
                         </div>
                       </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Data de Internação</label>
+                        <input type="date" value={newPatient.data_internacao || ''} onChange={(e) => setNewPatient({...newPatient, data_internacao: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-rose-500" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Diagnóstico Patológico</label>
+                        <textarea rows={3} value={newPatient.diagnostico_patologico || ''} onChange={(e) => setNewPatient({...newPatient, diagnostico_patologico: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-rose-500" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">Equipe Médica</label>
+                        <textarea rows={3} value={newPatient.equipe_medica || ''} onChange={(e) => setNewPatient({...newPatient, equipe_medica: e.target.value})} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:outline-none focus:border-rose-500" />
+                      </div>
                       <button 
-                        onClick={handleAddGalleryImage} 
-                        disabled={uploading || !newGallery.file}
-                        className="w-full bg-pink-500 text-white py-4 rounded-2xl font-bold text-sm shadow-lg shadow-pink-200 flex items-center justify-center gap-2 active:scale-95 transition-transform disabled:opacity-50"
+                        onClick={handleUpdatePatient} 
+                        disabled={uploading}
+                        className="w-full bg-rose-500 text-white py-4 rounded-2xl font-bold text-sm shadow-lg shadow-rose-200 flex items-center justify-center gap-2 active:scale-95 transition-transform disabled:opacity-50"
                       >
                         {uploading ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
-                        {uploading ? 'Enviando...' : 'Salvar na Galeria'}
+                        {uploading ? 'Salvando...' : 'Atualizar Perfil'}
                       </button>
-                    </>
+                    </div>
                   )}
                 </div>
               )}
@@ -1637,17 +1762,6 @@ export default function App() {
           <ClipboardList size={18} />
           <span className="text-[8px] font-bold uppercase tracking-widest">Exames</span>
         </button>
-        
-        <button 
-          onClick={() => setActiveTab('gallery')}
-          className={cn(
-            "flex flex-col items-center gap-1 transition-colors",
-            activeTab === 'gallery' ? "text-rose-500" : "text-slate-400"
-          )}
-        >
-          <ImageIcon size={18} />
-          <span className="text-[8px] font-bold uppercase tracking-widest">Galeria</span>
-        </button>
 
         {/* Floating Action Button */}
         <div className="relative -top-6">
@@ -1658,26 +1772,26 @@ export default function App() {
             <Plus size={24} />
           </button>
         </div>
-
+        
         <button 
-          onClick={() => setActiveTab('questions')}
+          onClick={() => setActiveTab('medications')}
           className={cn(
             "flex flex-col items-center gap-1 transition-colors",
-            activeTab === 'questions' ? "text-rose-500" : "text-slate-400"
+            activeTab === 'medications' ? "text-rose-500" : "text-slate-400"
           )}
         >
-          <MessageSquare size={18} />
-          <span className="text-[8px] font-bold uppercase tracking-widest">Dúvidas</span>
+          <Pill size={18} />
+          <span className="text-[8px] font-bold uppercase tracking-widest">Medicamentos</span>
         </button>
         <button 
-          onClick={() => setActiveTab('leaves')}
+          onClick={() => setActiveTab('profile')}
           className={cn(
             "flex flex-col items-center gap-1 transition-colors",
-            activeTab === 'leaves' ? "text-rose-500" : "text-slate-400"
+            activeTab === 'profile' ? "text-rose-500" : "text-slate-400"
           )}
         >
-          <Briefcase size={18} />
-          <span className="text-[8px] font-bold uppercase tracking-widest">Licenças</span>
+          <User size={18} />
+          <span className="text-[8px] font-bold uppercase tracking-widest">Perfil</span>
         </button>
       </nav>
     </div>

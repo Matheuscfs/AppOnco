@@ -1,7 +1,15 @@
 export interface Patient {
   id: string;
+  user_id: string;
+  nome: string;
+  foto_url?: string;
   cid_principal: string;
   diagnostico_patologico: string;
+  peso?: number;
+  data_internacao?: string;
+  equipe_medica?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Exam {
