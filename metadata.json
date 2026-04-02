@@ -1,0 +1,5 @@
+{
+  "name": "OncoTrack - Jornada do Paciente",
+  "description": "Aplicativo para acompanhamento oncológico, exames, métricas de tumor e licenças médicas.",
+  "requestFramePermissions": []
+}
